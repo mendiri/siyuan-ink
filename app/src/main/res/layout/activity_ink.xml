@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#FFFFFF"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/btnCancel"
+            style="@style/BarButton"
+            android:text="✕ Cancelar" />
+
+        <Button
+            android:id="@+id/btnPen"
+            style="@style/BarButton"
+            android:text="Pluma" />
+
+        <Button
+            android:id="@+id/btnEraser"
+            style="@style/BarButton"
+            android:text="Goma" />
+
+        <Button
+            android:id="@+id/btnWidth"
+            style="@style/BarButton"
+            android:text="Grosor" />
+
+        <Button
+            android:id="@+id/btnUndo"
+            style="@style/BarButton"
+            android:text="↶ Deshacer" />
+
+        <Button
+            android:id="@+id/btnClear"
+            style="@style/BarButton"
+            android:text="Borrar todo" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1" />
+
+        <Button
+            android:id="@+id/btnDone"
+            style="@style/BarButton"
+            android:textStyle="bold"
+            android:text="✓ Guardar" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#000000" />
+
+    <SurfaceView
+        android:id="@+id/surface"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+</LinearLayout>
