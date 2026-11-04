@@ -376,6 +376,52 @@
       });
   };
 
+  // --- Subrayado nativo de SiYuan en PDF ----------------------------------------------------
+  // SiYuan muestra su menú de colores al recibir un "click" (versiones antiguas) o un
+  // "pointerup" (recientes) tras seleccionar texto. En Android, al seleccionar con pulsación
+  // larga y tiradores no llega ninguno de los dos, así que lo simulamos cuando la selección
+  // de texto del PDF deja de cambiar.
+  var pdfSelTimer = null;
+  var lastPdfSel = '';
+  document.addEventListener('selectionchange', function () {
+    if (pdfSelTimer) clearTimeout(pdfSelTimer);
+    pdfSelTimer = setTimeout(function () {
+      pdfSelTimer = null;
+      var s = window.getSelection();
+      if (!s || !s.rangeCount) {
+        lastPdfSel = '';
+        return;
+      }
+      var r = s.getRangeAt(0);
+      var txt = r.toString();
+      if (!txt.trim()) {
+        lastPdfSel = '';
+        return;
+      }
+      var node = r.startContainer;
+      while (node && node.nodeType !== 1) node = node.parentNode;
+      if (!node || !node.closest || !node.closest('.pdfViewer .textLayer')) return;
+      var rects = r.getClientRects();
+      var last = rects[rects.length - 1];
+      var sig = txt + '|' + (last ? Math.round(last.left) + ',' + Math.round(last.bottom) : '');
+      if (sig === lastPdfSel) return;
+      lastPdfSel = sig;
+      var opts = {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX: last ? last.right : 0,
+        clientY: last ? last.bottom : 0
+      };
+      try {
+        node.dispatchEvent(new PointerEvent('pointerup', Object.assign({ pointerType: 'touch', pointerId: 1 }, opts)));
+      } catch (e) {}
+      try {
+        node.dispatchEvent(new MouseEvent('click', opts));
+      } catch (e) {}
+    }, 450);
+  });
+
   // --- Llamadas desde Android ------------------------------------------------------------
 
   // Botón "Tinta": con un PDF a la vista, anota encima de sus páginas.
