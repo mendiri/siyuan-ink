@@ -132,6 +132,47 @@ function fetchInk(key) {
     .catch(() => null);
 }
 
+let dirCache = null;
+let dirAt = 0;
+
+function listInkFiles() {
+  if (dirCache && Date.now() - dirAt < 10000) return Promise.resolve(dirCache);
+  return fetch("/api/file/readDir", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: "/data/storage/siyuan-ink/pdf" }),
+  })
+    .then((r) => r.json())
+    .then((j) => {
+      dirCache = j && j.code === 0 && Array.isArray(j.data) ? j.data.filter((f) => !f.isDir).map((f) => f.name) : [];
+      dirAt = Date.now();
+      return dirCache;
+    })
+    .catch(() => {
+      dirCache = [];
+      dirAt = Date.now();
+      return dirCache;
+    });
+}
+
+// Identificador único que SiYuan añade a cada recurso: "20260216073344-8kbx1ji".
+function assetToken(name) {
+  const m = /\d{14}-[a-z0-9]{7}/i.exec(name || "");
+  return m ? m[0] : null;
+}
+
+// Busca el archivo de anotaciones de este PDF aunque la clave se calculara distinto en la Boox.
+function resolveFile(key, legacy, files) {
+  if (files.includes(key + ".json")) return key;
+  if (legacy && files.includes(legacy + ".json")) return legacy;
+  const tok = assetToken(key) || assetToken(legacy);
+  if (tok) {
+    const f = files.find((n) => n.includes(tok));
+    if (f) return f.replace(/\.json$/, "");
+  }
+  return null;
+}
+
 module.exports = class SiYuanInkPlugin extends Plugin {
   onload() {
     this.cache = {}; // clave -> { data, text, loadedAt, loading }
@@ -168,18 +209,24 @@ module.exports = class SiYuanInkPlugin extends Plugin {
   }
 
   load(key, legacy) {
-    const entry = this.cache[key] || (this.cache[key] = { data: null, text: "", loadedAt: 0, ver: 0, source: "" });
+    const entry = this.cache[key] || (this.cache[key] = { data: null, text: "", loadedAt: 0, ver: 0, files: 0 });
     entry.loading = true;
-    fetchInk(key)
-      .then((res) => (res || legacy === key ? { res, source: key } : fetchInk(legacy).then((r) => ({ res: r, source: legacy }))))
-      .then(({ res, source }) => {
+    listInkFiles()
+      .then((files) => {
+        entry.files = files.length;
+        const file = resolveFile(key, legacy, files);
+        return file ? fetchInk(file) : null;
+      })
+      .then((res) => {
         const t = res ? res.t : "";
         if (t !== entry.text || !entry.data) {
           entry.text = t;
           entry.data = res ? res.d : { pages: {} };
-          entry.source = res ? source : "";
           entry.ver++;
         }
+      })
+      .catch(() => {
+        if (!entry.data) entry.data = { pages: {} };
       })
       .finally(() => {
         entry.loading = false;
@@ -210,7 +257,7 @@ module.exports = class SiYuanInkPlugin extends Plugin {
     } else {
       const n = Object.keys(entry.data.pages || {}).filter((k) => (entry.data.pages[k] || []).length).length;
       text = n ? "✎ SiYuan Ink: " + n + (n === 1 ? " página anotada" : " páginas anotadas")
-        : "✎ SiYuan Ink: sin anotaciones (" + key + ")";
+        : "✎ SiYuan Ink: sin anotaciones (" + key + ") · " + (entry.files || 0) + " archivos de tinta en el servidor";
     }
     if (b.textContent !== text) b.textContent = text;
   }

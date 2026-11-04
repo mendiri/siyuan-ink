@@ -252,14 +252,53 @@
       });
   }
 
-  // Carga las anotaciones; si no hay con la clave nueva, prueba la antigua (título de pestaña).
-  // Al guardar se escriben ya con la clave nueva.
+  // Archivos de anotaciones existentes (para encontrar el de este PDF aunque la clave
+  // se haya calculado distinto en otro dispositivo).
+  var dirCache = null;
+  var dirAt = 0;
+  var pdfFile = {}; // clave -> nombre real del archivo (sin .json)
+
+  function listInkFiles() {
+    if (dirCache && Date.now() - dirAt < 10000) return Promise.resolve(dirCache);
+    return api('/api/file/readDir', { path: '/data/storage/siyuan-ink/pdf' })
+      .then(function (d) {
+        dirCache = (d || []).filter(function (f) { return !f.isDir; }).map(function (f) { return f.name; });
+        dirAt = Date.now();
+        return dirCache;
+      })
+      .catch(function () {
+        dirCache = [];
+        dirAt = Date.now();
+        return dirCache;
+      });
+  }
+
+  // Identificador único que SiYuan añade a cada recurso: "20260216073344-8kbx1ji".
+  function assetToken(name) {
+    var m = /\d{14}-[a-z0-9]{7}/i.exec(name || '');
+    return m ? m[0] : null;
+  }
+
+  function resolveKey(key, legacy) {
+    return listInkFiles().then(function (files) {
+      if (files.indexOf(key + '.json') !== -1) return key;
+      if (legacy && files.indexOf(legacy + '.json') !== -1) return legacy;
+      var tok = assetToken(key) || assetToken(legacy);
+      if (tok) {
+        for (var i = 0; i < files.length; i++) {
+          if (files[i].indexOf(tok) !== -1) return files[i].replace(/\.json$/, '');
+        }
+      }
+      return key;
+    });
+  }
+
   function loadPdfInk(key, legacy) {
     if (pdfCache[key]) return Promise.resolve(pdfCache[key]);
-    return fetchPdfInk(key)
-      .then(function (d) {
-        if (d || !legacy || legacy === key) return d;
-        return fetchPdfInk(legacy);
+    return resolveKey(key, legacy)
+      .then(function (file) {
+        pdfFile[key] = file;
+        return fetchPdfInk(file);
       })
       .then(function (d) {
         d = d || { v: 1, pages: {} };
@@ -439,10 +478,11 @@
         });
         d.updated = Date.now();
         var fd = new FormData();
-        fd.append('path', pdfStorePath(p.key));
+        var file = pdfFile[p.key] || p.key;
+        fd.append('path', pdfStorePath(file));
         fd.append('isDir', 'false');
         fd.append('modTime', String(Date.now()));
-        fd.append('file', new Blob([JSON.stringify(d)], { type: 'application/json' }), p.key + '.json');
+        fd.append('file', new Blob([JSON.stringify(d)], { type: 'application/json' }), file + '.json');
         return fetch('/api/file/putFile', { method: 'POST', credentials: 'same-origin', body: fd })
           .then(function (r) {
             return r.json();
