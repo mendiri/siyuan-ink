@@ -245,7 +245,7 @@ class MainActivity : AppCompatActivity() {
                         InkPoint(
                             (pg.left + p.getDouble(0).toFloat() * scale) * density,
                             (pg.top + p.getDouble(1).toFloat() * scale) * density,
-                            0.5f, 0L
+                            p.optDouble(2, 0.5).toFloat(), 0L
                         )
                     )
                 }
@@ -256,6 +256,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         captureWebView { bmp ->
+            // Ya tenemos la captura sin anotaciones: las volvemos a mostrar en SiYuan.
+            web.evaluateJavascript("window.__siyuanInk && window.__siyuanInk.showLayers()", null)
             InkSession.reset(InkSession.MODE_PDF)
             InkSession.pdfKey = ctx.getString("key")
             InkSession.pdfPages = pages
@@ -303,7 +305,10 @@ class MainActivity : AppCompatActivity() {
             val k = 1000f / pg.width
             val pts = JSONArray()
             for (p in s.points) {
-                pts.put(JSONArray().put(r1((p.x / density - pg.left) * k)).put(r1((p.y / density - pg.top) * k)))
+                pts.put(
+                    JSONArray().put(r1((p.x / density - pg.left) * k)).put(r1((p.y / density - pg.top) * k))
+                        .put(Math.round(p.pressure * 100.0) / 100.0)
+                )
             }
             perPage[pg.n]!!.put(JSONObject().put("w", r1(s.width / density * k)).put("p", pts))
         }

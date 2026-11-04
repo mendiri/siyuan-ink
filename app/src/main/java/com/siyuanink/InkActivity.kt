@@ -16,6 +16,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import com.onyx.android.sdk.api.device.epd.EpdController
 import com.onyx.android.sdk.data.note.TouchPoint
 import com.onyx.android.sdk.pen.RawInputCallback
 import com.onyx.android.sdk.pen.TouchHelper
@@ -55,10 +56,14 @@ class InkActivity : AppCompatActivity() {
 
     private val inkPaint = Paint().apply {
         isAntiAlias = true
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
+        style = Paint.Style.FILL
         color = Color.BLACK
+    }
+
+    /** Presión máxima que da el lápiz de este dispositivo (para normalizarla de 0 a 1). */
+    private val maxPressure: Float by lazy {
+        val m = try { EpdController.getMaxTouchPressure() } catch (t: Throwable) { 0f }
+        if (m > 1f) m else 4096f
     }
     private val guidePaint = Paint().apply {
         color = Color.rgb(200, 200, 200)
@@ -190,7 +195,9 @@ class InkActivity : AppCompatActivity() {
         for (tp in list.points) {
             // Descarta puntos casi duplicados para aligerar el JSON y el SVG.
             if (!lx.isNaN() && Math.abs(tp.x - lx) < 0.8f && Math.abs(tp.y - ly) < 0.8f) continue
-            out.add(InkPoint(tp.x, tp.y, tp.pressure, tp.timestamp))
+            // Algunos firmwares ya dan la presión de 0 a 1; otros en unidades del digitalizador.
+            val pr = if (tp.pressure <= 1f) tp.pressure else tp.pressure / maxPressure
+            out.add(InkPoint(tp.x, tp.y, pr.coerceIn(0f, 1f), tp.timestamp))
             lx = tp.x
             ly = tp.y
         }
@@ -239,7 +246,6 @@ class InkActivity : AppCompatActivity() {
 
     private fun drawStroke(s: Stroke) {
         val c = inkCanvas ?: return
-        inkPaint.strokeWidth = s.width
         c.drawPath(s.toPath(), inkPaint)
     }
 
@@ -282,7 +288,8 @@ class InkActivity : AppCompatActivity() {
     private fun applyPenState() {
         val th = touchHelper ?: return
         th.setStrokeWidth(strokeWidthPx)
-        th.setStrokeStyle(TouchHelper.STROKE_STYLE_PENCIL)
+        // Estilo "pluma estilográfica": el SDK varía el grosor con la presión mientras escribes.
+        th.setStrokeStyle(TouchHelper.STROKE_STYLE_FOUNTAIN)
         // En modo goma no queremos que el SDK pinte tinta.
         th.setRawDrawingRenderEnabled(!eraser)
     }

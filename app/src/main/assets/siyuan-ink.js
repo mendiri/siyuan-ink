@@ -14,7 +14,8 @@
     st.textContent =
       '*,*::before,*::after{transition:none!important;animation:none!important;scroll-behavior:auto!important}' +
       '.protyle-wysiwyg [custom-ink] img{cursor:pointer}' +
-      '.siyuan-ink-layer{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:6}';
+      '.siyuan-ink-layer{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:6}' +
+      '.siyuan-ink-hide .siyuan-ink-layer{display:none!important}';
     (document.head || document.documentElement).appendChild(st);
   } catch (e) {}
 
@@ -220,16 +221,46 @@
     return { left: r.left + pg.clientLeft, top: r.top + pg.clientTop, width: pg.clientWidth, height: pg.clientHeight };
   }
 
-  function strokePath(pts) {
-    if (!pts.length) return '';
-    var d = 'M' + pts[0][0] + ' ' + pts[0][1];
-    if (pts.length === 1) return d + ' l0.1 0';
-    for (var i = 1; i < pts.length; i++) {
-      var a = pts[i - 1], b = pts[i];
-      d += ' Q' + a[0] + ' ' + a[1] + ' ' + ((a[0] + b[0]) / 2).toFixed(1) + ' ' + ((a[1] + b[1]) / 2).toFixed(1);
+  // Mismo cálculo que en Android (Stroke.widthFor): presión 0 → 35 %, 0.5 → 100 %, 1 → 165 %.
+  function widthFor(base, p) {
+    if (typeof p !== 'number') p = 0.5;
+    p = Math.max(0, Math.min(1, p));
+    return base * (0.35 + 1.3 * p);
+  }
+
+  function circle(cx, cy, r) {
+    return 'M' + (cx - r).toFixed(1) + ' ' + cy.toFixed(1) +
+      ' a' + r.toFixed(2) + ' ' + r.toFixed(2) + ' 0 1 0 ' + (2 * r).toFixed(2) + ' 0' +
+      ' a' + r.toFixed(2) + ' ' + r.toFixed(2) + ' 0 1 0 ' + (-2 * r).toFixed(2) + ' 0Z ';
+  }
+
+  // Contorno relleno de grosor variable (igual que Stroke.svgPathData en Android).
+  function strokePath(pts, base) {
+    var n = pts.length;
+    if (!n) return '';
+    var w = [];
+    for (var i = 0; i < n; i++) {
+      var sum = 0, c = 0;
+      for (var j = Math.max(0, i - 2); j <= Math.min(n - 1, i + 2); j++) {
+        sum += typeof pts[j][2] === 'number' ? pts[j][2] : 0.5;
+        c++;
+      }
+      w.push(widthFor(base, sum / c));
     }
-    var l = pts[pts.length - 1];
-    return d + ' L' + l[0] + ' ' + l[1];
+    var d = circle(pts[0][0], pts[0][1], w[0] / 2);
+    if (n === 1) return d;
+    d += circle(pts[n - 1][0], pts[n - 1][1], w[n - 1] / 2);
+    var left = [], right = [];
+    for (var k = 0; k < n; k++) {
+      var a = pts[Math.max(0, k - 1)], b = pts[Math.min(n - 1, k + 1)];
+      var dx = b[0] - a[0], dy = b[1] - a[1];
+      var len = Math.sqrt(dx * dx + dy * dy);
+      if (len < 0.0001) { dx = 1; dy = 0; } else { dx /= len; dy /= len; }
+      var h = w[k] / 2;
+      left.push((pts[k][0] - dy * h).toFixed(1) + ' ' + (pts[k][1] + dx * h).toFixed(1));
+      right.push((pts[k][0] + dy * h).toFixed(1) + ' ' + (pts[k][1] - dx * h).toFixed(1));
+    }
+    return d + 'M' + left.join(' L') + ' L' + right.reverse().join(' L') + 'Z';
   }
 
   function renderPdfViewer(viewer, force) {
@@ -254,9 +285,9 @@
       if (layer && layer.getAttribute('data-ver') === ver && !force) continue;
       if (pg.clientWidth < 1) continue;
       var h = ((pg.clientHeight / pg.clientWidth) * 1000).toFixed(1);
-      var html = '<g fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round">';
+      var html = '<g fill="#000" stroke="none">';
       for (var j = 0; j < strokes.length; j++) {
-        html += '<path stroke-width="' + strokes[j].w + '" d="' + strokePath(strokes[j].p) + '"/>';
+        html += '<path d="' + strokePath(strokes[j].p, strokes[j].w) + '"/>';
       }
       html += '</g>';
       if (!layer) {
@@ -292,11 +323,26 @@
           pages.push({ n: n, left: b.left, top: b.top, width: b.width, height: b.height, strokes: d.pages[n] || [] });
         }
         if (!pages.length) throw new Error('no hay páginas del PDF a la vista');
-        Native.openPdfInk(JSON.stringify({ key: key, pages: pages }));
+        var ctx = JSON.stringify({ key: key, pages: pages });
+        // Ocultamos las anotaciones guardadas para que no salgan en la captura de fondo
+        // (se cargan como trazos editables). Android las vuelve a mostrar tras capturar.
+        document.documentElement.classList.add('siyuan-ink-hide');
+        requestAnimationFrame(function () {
+          requestAnimationFrame(function () {
+            setTimeout(function () {
+              Native.openPdfInk(ctx);
+            }, 120);
+          });
+        });
       })
       .catch(function (e) {
+        S.showLayers();
         Native.notify(false, e.message || String(e));
       });
+  };
+
+  S.showLayers = function () {
+    document.documentElement.classList.remove('siyuan-ink-hide');
   };
 
   S.savePdf = function (p) {
