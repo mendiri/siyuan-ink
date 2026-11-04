@@ -350,6 +350,14 @@ class MainActivity : AppCompatActivity() {
         layout.addView(url)
         layout.addView(desktop)
         layout.addView(status)
+        if (!firstRun) {
+            val plugin = Button(this).apply {
+                text = "Instalar/actualizar plugin para ver la tinta en el PC"
+                isAllCaps = false
+                setOnClickListener { installPlugin() }
+            }
+            layout.addView(plugin)
+        }
 
         AlertDialog.Builder(this)
             .setTitle(if (firstRun) "Conectar con SiYuan" else "Ajustes")
@@ -363,6 +371,24 @@ class MainActivity : AppCompatActivity() {
             }
             .apply { if (!firstRun) setNegativeButton("Cancelar", null) }
             .show()
+    }
+
+    /** Sube a SiYuan el plugin (assets/siyuan-plugin) que dibuja las anotaciones de PDF en el PC. */
+    private fun installPlugin() {
+        val files = JSONObject()
+        try {
+            for (name in assets.list("siyuan-plugin") ?: emptyArray()) {
+                val bytes = assets.open("siyuan-plugin/$name").use { it.readBytes() }
+                files.put(name, android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP))
+            }
+        } catch (e: Exception) {
+            toast("No se pudo leer el plugin: ${e.message}")
+            return
+        }
+        toast("Instalando plugin…")
+        web.evaluateJavascript(
+            "(function(){ if (!window.__siyuanInk) return 'no'; window.__siyuanInk.installPlugin($files); return 'ok'; })()"
+        ) { r -> if (r?.contains("ok") != true) toast("SiYuan aún no ha cargado") }
     }
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_LONG).show()

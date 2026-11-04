@@ -1,0 +1,22 @@
+{
+  "name": "siyuan-ink",
+  "author": "mendiri",
+  "url": "https://github.com/mendiri/siyuan-ink",
+  "version": "0.1.0",
+  "minAppVersion": "3.0.0",
+  "backends": ["all"],
+  "frontends": ["all"],
+  "displayName": {
+    "default": "SiYuan Ink",
+    "es_ES": "SiYuan Ink"
+  },
+  "description": {
+    "default": "Shows pen annotations made on PDFs with the SiYuan Ink app for Boox.",
+    "es_ES": "Muestra sobre los PDF las anotaciones a lápiz hechas con la app SiYuan Ink para Boox."
+  },
+  "readme": {
+    "default": "README.md"
+  },
+  "funding": {},
+  "keywords": ["ink", "pdf", "boox", "handwriting"]
+}

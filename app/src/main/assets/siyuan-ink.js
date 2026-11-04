@@ -341,6 +341,39 @@
       });
   };
 
+  // Instala (o actualiza) el plugin que muestra las anotaciones en el SiYuan del PC.
+  // files: { "nombre": "contenido en base64" }
+  S.installPlugin = function (files) {
+    var names = Object.keys(files);
+    var chain = Promise.resolve();
+    names.forEach(function (name) {
+      chain = chain.then(function () {
+        var bin = atob(files[name]);
+        var bytes = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        var fd = new FormData();
+        fd.append('path', '/data/plugins/siyuan-ink/' + name);
+        fd.append('isDir', 'false');
+        fd.append('modTime', String(Date.now()));
+        fd.append('file', new Blob([bytes]), name);
+        return fetch('/api/file/putFile', { method: 'POST', credentials: 'same-origin', body: fd })
+          .then(function (r) {
+            return r.json();
+          })
+          .then(function (j) {
+            if (j.code !== 0) throw new Error(name + ': ' + (j.msg || 'error'));
+          });
+      });
+    });
+    chain
+      .then(function () {
+        Native.notify(true, 'Plugin instalado. Actívalo en SiYuan: Ajustes → Bazar → Descargados → Plugins');
+      })
+      .catch(function (e) {
+        Native.notify(false, 'no se pudo instalar el plugin: ' + (e.message || e));
+      });
+  };
+
   S.showLayers = function () {
     document.documentElement.classList.remove('siyuan-ink-hide');
   };
