@@ -12,8 +12,8 @@ android {
         minSdk = 26
         // El SDK de Onyx usa APIs ocultas de Android; con targetSdk 30 funciona como en sus demos.
         targetSdk = 30
-        versionCode = 5
-        versionName = "0.4.0"
+        versionCode = 6
+        versionName = "0.4.1"
 
         ndk {
             abiFilters += listOf("armeabi-v7a", "arm64-v8a")

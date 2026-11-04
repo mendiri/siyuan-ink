@@ -171,8 +171,40 @@
     return null;
   }
 
-  function pdfKeyOf(viewer) {
-    if (viewer.__inkKey) return viewer.__inkKey;
+  function sanitizeKey(name) {
+    return String(name).trim().replace(/[^\w.\-]+/g, '_').slice(0, 150) || 'pdf';
+  }
+
+  // Ruta del PDF dentro de SiYuan (p. ej. "assets/libro-2024….pdf"), buscando en el modelo
+  // de pestañas de SiYuan el visor que contiene este elemento. Es igual en todos los dispositivos.
+  function assetPathOf(viewer) {
+    try {
+      var root = window.siyuan && window.siyuan.layout;
+      if (!root) return null;
+      var found = null;
+      var seen = [];
+      var walk = function (o, depth) {
+        if (!o || typeof o !== 'object' || found || depth > 14 || seen.indexOf(o) !== -1) return;
+        seen.push(o);
+        if (typeof o.path === 'string' && /\.pdf$/i.test(o.path) && o.element && o.element.contains && o.element.contains(viewer)) {
+          found = o.path;
+          return;
+        }
+        if (Array.isArray(o.children)) o.children.forEach(function (c) { walk(c, depth + 1); });
+        if (o.model) walk(o.model, depth + 1);
+        if (o.layout) walk(o.layout, depth + 1);
+        if (o.centerLayout) walk(o.centerLayout, depth + 1);
+      };
+      walk(root, 0);
+      if (!found) return null;
+      return found.replace(/^https?:\/\/[^/]+\//, '').replace(/^\/+/, '');
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Clave antigua (versiones ≤ 0.4): título de la pestaña.
+  function titleKeyOf(viewer) {
     var name = '';
     var el = viewer;
     while (el && el.parentElement && !name) {
@@ -185,17 +217,23 @@
       }
     }
     if (!name) name = document.title || 'pdf';
-    var key = name.trim().replace(/[^\w.\-]+/g, '_').slice(0, 120) || 'pdf';
-    viewer.__inkKey = key;
-    return key;
+    return sanitizeKey(name).slice(0, 120);
+  }
+
+  function pdfKeyOf(viewer) {
+    if (viewer.__inkKey) return viewer.__inkKey;
+    viewer.__inkLegacy = titleKeyOf(viewer);
+    var path = assetPathOf(viewer);
+    if (!path) return viewer.__inkLegacy;
+    viewer.__inkKey = sanitizeKey(path);
+    return viewer.__inkKey;
   }
 
   function pdfStorePath(key) {
     return '/data/storage/siyuan-ink/pdf/' + key + '.json';
   }
 
-  function loadPdfInk(key) {
-    if (pdfCache[key]) return Promise.resolve(pdfCache[key]);
+  function fetchPdfInk(key) {
     return fetch('/api/file/getFile', {
       method: 'POST',
       credentials: 'same-origin',
@@ -210,7 +248,21 @@
         try {
           d = JSON.parse(t);
         } catch (e) {}
-        if (!d || !d.pages) d = { v: 1, pages: {} };
+        return d && d.pages ? d : null;
+      });
+  }
+
+  // Carga las anotaciones; si no hay con la clave nueva, prueba la antigua (título de pestaña).
+  // Al guardar se escriben ya con la clave nueva.
+  function loadPdfInk(key, legacy) {
+    if (pdfCache[key]) return Promise.resolve(pdfCache[key]);
+    return fetchPdfInk(key)
+      .then(function (d) {
+        if (d || !legacy || legacy === key) return d;
+        return fetchPdfInk(legacy);
+      })
+      .then(function (d) {
+        d = d || { v: 1, pages: {} };
         pdfCache[key] = d;
         return d;
       });
@@ -267,7 +319,7 @@
     var key = pdfKeyOf(viewer);
     var data = pdfCache[key];
     if (!data) {
-      loadPdfInk(key).then(function () {
+      loadPdfInk(key, viewer.__inkLegacy).then(function () {
         renderPdfViewer(viewer, true);
       });
       return;
@@ -312,7 +364,7 @@
 
   S.pdfInk = function (viewer) {
     var key = pdfKeyOf(viewer);
-    loadPdfInk(key)
+    loadPdfInk(key, viewer.__inkLegacy)
       .then(function (d) {
         var pages = [];
         var list = viewer.querySelectorAll('.page[data-page-number]');
