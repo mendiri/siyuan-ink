@@ -12,6 +12,9 @@ con la misma fluidez que la app Notas de Boox.
 - **Reconocimiento de escritura** (ML Kit, en el dispositivo): el texto reconocido se guarda como texto alternativo de la
   imagen y en el atributo `custom-ink-text`, para que las notas manuscritas aparezcan en las búsquedas.
 - **✍ Escribir → texto**: escribes a mano, revisas/corriges el texto reconocido y se inserta donde estaba el cursor.
+- **Anotar PDFs**: con un PDF abierto en SiYuan, **✎ Tinta** permite escribir encima de las páginas visibles.
+  Las anotaciones se guardan en `data/storage/siyuan-ink/pdf/<nombre-del-pdf>.json` (se sincronizan con SiYuan)
+  y se vuelven a dibujar sobre el PDF, también al hacer zoom. *Solo se ven dentro de SiYuan Ink.*
 - Goma del lápiz (botón/extremo trasero) y modo goma, deshacer, tres grosores.
 
 ## Instalación

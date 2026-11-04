@@ -3,6 +3,11 @@ package com.siyuanink
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Rect
+import android.os.Handler
+import android.os.Looper
+import android.view.PixelCopy
 import android.net.Uri
 import android.os.Bundle
 import android.text.InputType
@@ -24,7 +29,9 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.math.abs
 
 class MainActivity : AppCompatActivity() {
 
@@ -187,6 +194,11 @@ class MainActivity : AppCompatActivity() {
     private fun onInkResult() {
         val result = InkSession.result ?: return
         InkSession.result = null
+        InkSession.background = null
+        if (InkSession.mode == InkSession.MODE_PDF) {
+            savePdfInk(result.drawing ?: Drawing())
+            return
+        }
         if (InkSession.mode == InkSession.MODE_TEXT) {
             if (result.text.isBlank()) return
             web.evaluateJavascript("window.__siyuanInk && window.__siyuanInk.insertText(${JSONObject.quote(result.text)})", null)
@@ -201,6 +213,108 @@ class MainActivity : AppCompatActivity() {
             web.evaluateJavascript("window.__siyuanInk && window.__siyuanInk.save($payload)", null)
         }
     }
+
+    // ---- Anotar PDF ---------------------------------------------------------------------------
+
+    /**
+     * [ctxJson] viene de siyuan-ink.js: clave del PDF y páginas visibles con su posición en
+     * píxeles CSS y sus trazos guardados (coordenadas normalizadas: el ancho de la página = 1000).
+     */
+    private fun openPdfEditor(ctxJson: String) {
+        val ctx = try { JSONObject(ctxJson) } catch (e: Exception) { toast("Datos del PDF no válidos"); return }
+        val density = resources.displayMetrics.density
+        val pages = ArrayList<PdfPage>()
+        val initial = Drawing()
+        val arr = ctx.getJSONArray("pages")
+        for (i in 0 until arr.length()) {
+            val o = arr.getJSONObject(i)
+            val pg = PdfPage(
+                o.getString("n"), o.getDouble("left").toFloat(), o.getDouble("top").toFloat(),
+                o.getDouble("width").toFloat(), o.getDouble("height").toFloat()
+            )
+            pages.add(pg)
+            val strokes = o.optJSONArray("strokes") ?: continue
+            val scale = pg.width / 1000f
+            for (j in 0 until strokes.length()) {
+                val so = strokes.getJSONObject(j)
+                val pts = so.getJSONArray("p")
+                val list = ArrayList<InkPoint>(pts.length())
+                for (k in 0 until pts.length()) {
+                    val p = pts.getJSONArray(k)
+                    list.add(
+                        InkPoint(
+                            (pg.left + p.getDouble(0).toFloat() * scale) * density,
+                            (pg.top + p.getDouble(1).toFloat() * scale) * density,
+                            0.5f, 0L
+                        )
+                    )
+                }
+                if (list.isNotEmpty()) {
+                    initial.strokes.add(Stroke((so.getDouble("w").toFloat() * scale * density).coerceAtLeast(1f), list))
+                }
+            }
+        }
+
+        captureWebView { bmp ->
+            InkSession.reset(InkSession.MODE_PDF)
+            InkSession.pdfKey = ctx.getString("key")
+            InkSession.pdfPages = pages
+            InkSession.background = bmp
+            InkSession.initial = initial
+            inkLauncher.launch(Intent(this, InkActivity::class.java))
+        }
+    }
+
+    /** Captura lo que se ve en la vista web (incluidas las páginas del PDF) para usarlo de fondo. */
+    private fun captureWebView(done: (Bitmap?) -> Unit) {
+        val w = web.width
+        val h = web.height
+        if (w <= 0 || h <= 0) { done(null); return }
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val fallback = {
+            try { web.draw(Canvas(bmp)); done(bmp) } catch (e: Exception) { done(null) }
+        }
+        try {
+            val loc = IntArray(2)
+            web.getLocationInWindow(loc)
+            PixelCopy.request(
+                window, Rect(loc[0], loc[1], loc[0] + w, loc[1] + h), bmp,
+                { res -> if (res == PixelCopy.SUCCESS) done(bmp) else fallback() },
+                Handler(Looper.getMainLooper())
+            )
+        } catch (e: Exception) {
+            fallback()
+        }
+    }
+
+    /** Reparte los trazos entre las páginas visibles y los envía a SiYuan normalizados. */
+    private fun savePdfInk(drawing: Drawing) {
+        val pages = InkSession.pdfPages
+        if (pages.isEmpty()) return
+        val density = resources.displayMetrics.density
+        val perPage = LinkedHashMap<String, JSONArray>()
+        for (pg in pages) perPage[pg.n] = JSONArray()
+        for (s in drawing.strokes) {
+            val cx = s.bounds.centerX() / density
+            val cy = s.bounds.centerY() / density
+            val pg = pages.firstOrNull { cx >= it.left && cx <= it.left + it.width && cy >= it.top && cy <= it.top + it.height }
+                ?: pages.minByOrNull { minOf(abs(cy - it.top), abs(cy - (it.top + it.height))) }
+                ?: continue
+            val k = 1000f / pg.width
+            val pts = JSONArray()
+            for (p in s.points) {
+                pts.put(JSONArray().put(r1((p.x / density - pg.left) * k)).put(r1((p.y / density - pg.top) * k)))
+            }
+            perPage[pg.n]!!.put(JSONObject().put("w", r1(s.width / density * k)).put("p", pts))
+        }
+        val pagesObj = JSONObject()
+        for ((n, a) in perPage) pagesObj.put(n, a)
+        val payload = JSONObject().put("key", InkSession.pdfKey).put("pages", pagesObj)
+        toast("Guardando anotación…")
+        web.evaluateJavascript("window.__siyuanInk && window.__siyuanInk.savePdf($payload)", null)
+    }
+
+    private fun r1(v: Float): Double = Math.round(v * 10.0) / 10.0
 
     // ---- Ajustes ------------------------------------------------------------------------------
 
@@ -254,6 +368,11 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun openEditor(blockId: String?, json: String?) {
             runOnUiThread { openInkEditor(blockId ?: "", json ?: "") }
+        }
+
+        @JavascriptInterface
+        fun openPdfInk(ctxJson: String?) {
+            runOnUiThread { if (ctxJson != null) openPdfEditor(ctxJson) }
         }
 
         @JavascriptInterface

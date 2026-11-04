@@ -66,6 +66,8 @@ class InkActivity : AppCompatActivity() {
     }
 
     private val isTextMode get() = InkSession.mode == InkSession.MODE_TEXT
+    private val isPdfMode get() = InkSession.mode == InkSession.MODE_PDF
+    private val background: Bitmap? = InkSession.background
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -77,6 +79,7 @@ class InkActivity : AppCompatActivity() {
         btnDone = findViewById(R.id.btnDone)
 
         InkSession.initial?.let { drawing.strokes.addAll(it.strokes) }
+        if (isPdfMode) InkSession.initial = null
         if (isTextMode) btnDone.text = "✓ Convertir a texto"
 
         findViewById<Button>(R.id.btnCancel).setOnClickListener { confirmDiscard() }
@@ -109,7 +112,8 @@ class InkActivity : AppCompatActivity() {
             inkBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             inkCanvas = Canvas(inkBitmap!!)
             // Si editamos un dibujo existente, lo colocamos arriba a la izquierda, en el primer renglón.
-            if (InkSession.initial != null && !drawing.isEmpty()) {
+            // (En un PDF no: los trazos van en su posición exacta sobre la página.)
+            if (!isPdfMode && InkSession.initial != null && !drawing.isEmpty()) {
                 drawing.moveTo(24f * density, lineSpacingPx * 0.5f)
                 InkSession.initial = null
             }
@@ -251,10 +255,15 @@ class InkActivity : AppCompatActivity() {
         val c = try { holder.lockCanvas() } catch (t: Throwable) { null } ?: return
         try {
             c.drawColor(Color.WHITE)
-            var y = lineSpacingPx
-            while (y < c.height) {
-                c.drawLine(0f, y, c.width.toFloat(), y, guidePaint)
-                y += lineSpacingPx
+            val bg = background
+            if (bg != null && !bg.isRecycled) {
+                c.drawBitmap(bg, 0f, 0f, null)
+            } else {
+                var y = lineSpacingPx
+                while (y < c.height) {
+                    c.drawLine(0f, y, c.width.toFloat(), y, guidePaint)
+                    y += lineSpacingPx
+                }
             }
             c.drawBitmap(bmp, 0f, 0f, null)
         } finally {
@@ -335,6 +344,13 @@ class InkActivity : AppCompatActivity() {
 
     private fun finishDrawing() {
         if (busy) return
+        if (isPdfMode) {
+            // En un PDF también se guarda vacío: así se pueden borrar anotaciones existentes.
+            InkSession.result = InkResult("", "", "", Drawing().also { it.strokes.addAll(drawing.strokes) })
+            setResult(RESULT_OK)
+            finish()
+            return
+        }
         if (drawing.isEmpty()) {
             cancel()
             return
