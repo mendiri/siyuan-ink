@@ -293,18 +293,30 @@
     });
   }
 
-  function loadPdfInk(key, legacy) {
-    if (pdfCache[key]) return Promise.resolve(pdfCache[key]);
-    return resolveKey(key, legacy)
+  var pdfCacheAt = {};
+  var pdfLoading = {};
+
+  function loadPdfInk(key, legacy, fresh) {
+    if (pdfCache[key] && !fresh) return Promise.resolve(pdfCache[key]);
+    if (pdfLoading[key]) return pdfLoading[key];
+    pdfLoading[key] = resolveKey(key, legacy)
       .then(function (file) {
         pdfFile[key] = file;
         return fetchPdfInk(file);
       })
       .then(function (d) {
         d = d || { v: 1, pages: {} };
+        var old = pdfCache[key];
+        // Si cambió (p. ej. se editó en el PC), forzamos repintado.
+        if (old && JSON.stringify(old.pages) !== JSON.stringify(d.pages)) d.updated = Date.now();
         pdfCache[key] = d;
+        pdfCacheAt[key] = Date.now();
         return d;
+      })
+      .finally(function () {
+        delete pdfLoading[key];
       });
+    return pdfLoading[key];
   }
 
   function pageBox(pg) {
@@ -357,6 +369,9 @@
   function renderPdfViewer(viewer, force) {
     var key = pdfKeyOf(viewer);
     var data = pdfCache[key];
+    if (data && Date.now() - (pdfCacheAt[key] || 0) > 20000 && !pdfLoading[key]) {
+      loadPdfInk(key, viewer.__inkLegacy, true);
+    }
     if (!data) {
       loadPdfInk(key, viewer.__inkLegacy).then(function () {
         renderPdfViewer(viewer, true);
@@ -403,7 +418,7 @@
 
   S.pdfInk = function (viewer) {
     var key = pdfKeyOf(viewer);
-    loadPdfInk(key, viewer.__inkLegacy)
+    loadPdfInk(key, viewer.__inkLegacy, true)
       .then(function (d) {
         var pages = [];
         var list = viewer.querySelectorAll('.page[data-page-number]');
