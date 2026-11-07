@@ -14,6 +14,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("desktopUi", false)
         set(v) = sp.edit().putBoolean("desktopUi", v).apply()
 
+    /** Token de GitHub (solo lectura) para descargar actualizaciones del repositorio privado. */
+    var githubToken: String
+        get() = sp.getString("githubToken", "") ?: ""
+        set(v) = sp.edit().putString("githubToken", v.trim()).apply()
+
     companion object {
         fun normalizeUrl(raw: String): String {
             var u = raw.trim()

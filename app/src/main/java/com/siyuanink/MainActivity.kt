@@ -7,6 +7,7 @@ import android.graphics.Canvas
 import android.graphics.Rect
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.view.PixelCopy
 import android.net.Uri
 import android.os.Bundle
@@ -29,6 +30,8 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.abs
@@ -39,6 +42,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var prefs: Prefs
     private var defaultUserAgent = ""
     private var fileCallback: ValueCallback<Array<Uri>>? = null
+    private var pluginSynced = false
+    private var updateDialogShown = false
 
     private val bridgeJs by lazy { assets.open("siyuan-ink.js").bufferedReader().use { it.readText() } }
 
@@ -78,6 +83,9 @@ class MainActivity : AppCompatActivity() {
         } else {
             loadServer()
         }
+
+        // Al abrir la app, mira si hay una versión nueva en GitHub (sin molestar si falla).
+        if (savedInstanceState == null) checkForUpdates(silent = true)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -111,6 +119,7 @@ class MainActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView, url: String?) {
                 super.onPageFinished(view, url)
                 view.evaluateJavascript(bridgeJs, null)
+                syncPluginOnce()
             }
 
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
@@ -346,9 +355,25 @@ class MainActivity : AppCompatActivity() {
                 "Si tu SiYuan tiene código de acceso, te lo pedirá la propia página la primera vez."
             textSize = 13f
         }
+        val tokenLabel = TextView(this).apply {
+            text = "\nToken de GitHub para actualizaciones automáticas (solo lectura del repositorio siyuan-ink):"
+        }
+        val token = EditText(this).apply {
+            setText(prefs.githubToken)
+            hint = "github_pat_…"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine()
+        }
+        val version = TextView(this).apply {
+            text = "Versión instalada: build ${Updater.installedBuild(this@MainActivity)}"
+            textSize = 13f
+        }
         layout.addView(label)
         layout.addView(url)
         layout.addView(desktop)
+        layout.addView(tokenLabel)
+        layout.addView(token)
+        layout.addView(version)
         layout.addView(status)
         if (!firstRun) {
             val plugin = Button(this).apply {
@@ -357,6 +382,15 @@ class MainActivity : AppCompatActivity() {
                 setOnClickListener { installPlugin() }
             }
             layout.addView(plugin)
+            val check = Button(this).apply {
+                text = "Buscar actualizaciones ahora"
+                isAllCaps = false
+                setOnClickListener {
+                    prefs.githubToken = token.text.toString()
+                    checkForUpdates(silent = false)
+                }
+            }
+            layout.addView(check)
         }
 
         AlertDialog.Builder(this)
@@ -366,6 +400,7 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("Guardar") { _, _ ->
                 prefs.serverUrl = url.text.toString()
                 prefs.desktopUi = desktop.isChecked
+                prefs.githubToken = token.text.toString()
                 applyUserAgent()
                 loadServer()
             }
@@ -373,14 +408,98 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    // ---- Actualizaciones -----------------------------------------------------------------------
+
+    private fun checkForUpdates(silent: Boolean) {
+        val token = prefs.githubToken
+        if (silent && token.isBlank()) return
+        lifecycleScope.launch {
+            val rel = try {
+                Updater.fetchLatest(token)
+            } catch (e: Exception) {
+                if (!silent) toast("No se pudo comprobar: ${e.message}")
+                return@launch
+            }
+            val installed = Updater.installedBuild(this@MainActivity)
+            if (rel.build <= installed) {
+                if (!silent) toast("Ya tienes la última versión (build $installed)")
+                return@launch
+            }
+            if (updateDialogShown) return@launch
+            updateDialogShown = true
+            AlertDialog.Builder(this@MainActivity)
+                .setTitle("Hay una versión nueva")
+                .setMessage("Instalada: build $installed\nDisponible: build ${rel.build}\n\n¿Descargar e instalar ahora?")
+                .setPositiveButton("Actualizar") { _, _ -> downloadAndInstall(rel) }
+                .setNegativeButton("Más tarde", null)
+                .setOnDismissListener { updateDialogShown = false }
+                .show()
+        }
+    }
+
+    private fun downloadAndInstall(rel: Updater.Release) {
+        if (!Updater.canInstall(this)) {
+            AlertDialog.Builder(this)
+                .setTitle("Permiso necesario")
+                .setMessage("Android tiene que permitir que SiYuan Ink instale actualizaciones. Activa \"Permitir de esta fuente\" en la pantalla que se abrirá, vuelve y pulsa de nuevo \"Actualizar\".")
+                .setPositiveButton("Abrir ajustes") { _, _ ->
+                    try {
+                        startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+                    } catch (e: Exception) {
+                        toast("Ábrelo en Ajustes → Apps → SiYuan Ink → Instalar apps desconocidas")
+                    }
+                }
+                .setNegativeButton("Cancelar", null)
+                .show()
+            return
+        }
+        val progress = AlertDialog.Builder(this)
+            .setTitle("Descargando build ${rel.build}")
+            .setMessage("0 %")
+            .setCancelable(false)
+            .show()
+        lifecycleScope.launch {
+            try {
+                val apk = Updater.download(this@MainActivity, prefs.githubToken, rel) { pct ->
+                    progress.setMessage("$pct %")
+                }
+                progress.dismiss()
+                Updater.install(this@MainActivity, apk)
+            } catch (e: Exception) {
+                progress.dismiss()
+                toast("No se pudo descargar: ${e.message}")
+            }
+        }
+    }
+
+    private fun pluginFilesJson(): JSONObject {
+        val files = JSONObject()
+        for (name in assets.list("siyuan-plugin") ?: emptyArray()) {
+            val bytes = assets.open("siyuan-plugin/$name").use { it.readBytes() }
+            files.put(name, android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP))
+        }
+        return files
+    }
+
+    /** Si el plugin del PC ya está en el servidor, lo deja en la misma versión que trae la app. */
+    private fun syncPluginOnce() {
+        if (pluginSynced) return
+        pluginSynced = true
+        try {
+            val version = JSONObject(assets.open("siyuan-plugin/plugin.json").bufferedReader().use { it.readText() })
+                .getString("version")
+            web.evaluateJavascript(
+                "window.__siyuanInk && window.__siyuanInk.syncPlugin(${pluginFilesJson()}, ${JSONObject.quote(version)})", null
+            )
+        } catch (e: Exception) {
+            pluginSynced = false
+        }
+    }
+
     /** Sube a SiYuan el plugin (assets/siyuan-plugin) que dibuja las anotaciones de PDF en el PC. */
     private fun installPlugin() {
-        val files = JSONObject()
-        try {
-            for (name in assets.list("siyuan-plugin") ?: emptyArray()) {
-                val bytes = assets.open("siyuan-plugin/$name").use { it.readBytes() }
-                files.put(name, android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP))
-            }
+        val files = try {
+            pluginFilesJson()
         } catch (e: Exception) {
             toast("No se pudo leer el plugin: ${e.message}")
             return

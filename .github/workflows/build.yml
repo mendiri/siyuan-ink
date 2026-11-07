@@ -35,9 +35,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          BUILD=$((GITHUB_RUN_NUMBER + 100))
           cp app/build/outputs/apk/debug/app-debug.apk SiYuanInk.apk
           gh release delete latest --yes --cleanup-tag || true
+          # La app lee "build N" del título para saber si hay actualización.
           gh release create latest SiYuanInk.apk \
-            --title "Última versión (${GITHUB_SHA::7})" \
+            --title "SiYuan Ink build ${BUILD} (${GITHUB_SHA::7})" \
             --notes "APK compilado automáticamente desde ${GITHUB_SHA}." \
             --prerelease --target "${GITHUB_SHA}"

@@ -434,10 +434,9 @@
 
   // Instala (o actualiza) el plugin que muestra las anotaciones en el SiYuan del PC.
   // files: { "nombre": "contenido en base64" }
-  S.installPlugin = function (files) {
-    var names = Object.keys(files);
+  function putPluginFiles(files) {
     var chain = Promise.resolve();
-    names.forEach(function (name) {
+    Object.keys(files).forEach(function (name) {
       chain = chain.then(function () {
         var bin = atob(files[name]);
         var bytes = new Uint8Array(bin.length);
@@ -456,12 +455,44 @@
           });
       });
     });
-    chain
+    return chain;
+  }
+
+  S.installPlugin = function (files) {
+    putPluginFiles(files)
       .then(function () {
         Native.notify(true, 'Plugin instalado. Actívalo en SiYuan: Ajustes → Bazar → Descargados → Plugins');
       })
       .catch(function (e) {
         Native.notify(false, 'no se pudo instalar el plugin: ' + (e.message || e));
+      });
+  };
+
+  // Si el plugin ya está instalado en el servidor y es de otra versión, lo actualiza sin preguntar.
+  S.syncPlugin = function (files, version) {
+    api('/api/file/readDir', { path: '/data/plugins/siyuan-ink' })
+      .then(function () {
+        return fetch('/api/file/getFile', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: '/data/plugins/siyuan-ink/plugin.json' })
+        }).then(function (r) {
+          return r.text();
+        });
+      })
+      .then(function (t) {
+        var v = null;
+        try {
+          v = JSON.parse(t).version;
+        } catch (e) {}
+        if (v === version) return;
+        return putPluginFiles(files).then(function () {
+          Native.notify(true, 'Plugin del PC actualizado a la versión ' + version + '. En el PC se aplica al reiniciar SiYuan tras sincronizar.');
+        });
+      })
+      .catch(function () {
+        /* El plugin no está instalado: no hacemos nada. */
       });
   };
 

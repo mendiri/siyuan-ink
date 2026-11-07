@@ -29,6 +29,19 @@ con la misma fluidez que la app Notas de Boox.
 4. Si SiYuan tiene código de acceso, la propia página lo pedirá la primera vez.
 5. La primera vez necesita internet para descargar el modelo de reconocimiento de español (~20 MB).
 
+### Actualizaciones automáticas
+
+Cada cambio en `main` compila una release `latest` titulada `SiYuan Ink build N`. Al abrirse, la app la consulta
+y, si es más nueva que la instalada, ofrece descargarla e instalarla (Android pide confirmar con un toque).
+Como el repositorio es privado, hace falta un **token de GitHub de solo lectura** en ⚙ → *Token de GitHub*:
+
+1. https://github.com/settings/personal-access-tokens/new (*Fine-grained token*).
+2. *Repository access* → *Only select repositories* → `siyuan-ink`.
+3. *Permissions* → *Repository permissions* → **Contents: Read-only**.
+4. Genera el token y pégalo en la app.
+
+Si el plugin del PC ya está instalado en el servidor, la app lo actualiza sola cuando trae una versión nueva.
+
 ### Ajustes recomendados en la Boox
 
 Mantén pulsado el icono de *SiYuan Ink* → **Optimizar**: modo de refresco *Equilibrado* o *Rápido* para la navegación.

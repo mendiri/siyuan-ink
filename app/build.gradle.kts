@@ -12,8 +12,11 @@ android {
         minSdk = 26
         // El SDK de Onyx usa APIs ocultas de Android; con targetSdk 30 funciona como en sus demos.
         targetSdk = 30
-        versionCode = 7
-        versionName = "0.4.2"
+        // En GitHub Actions cada compilación lleva un número creciente (build), que la app
+        // usa para saber si hay una versión nueva. En local se queda en 1.
+        val build = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()?.plus(100) ?: 1
+        versionCode = build
+        versionName = "0.5.$build"
 
         ndk {
             abiFilters += listOf("armeabi-v7a", "arm64-v8a")
